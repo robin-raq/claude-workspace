@@ -1,4 +1,6 @@
 import { existsSync } from 'node:fs';
+import { rmdir } from 'node:fs/promises';
+import path from 'node:path';
 import type { Command } from 'commander';
 import type { AppContext } from '../context.js';
 import { CwError } from '../errors.js';
@@ -184,6 +186,28 @@ export function registerLifecycleCommands(program: Command, ctx: AppContext): vo
           'GIT_ERROR',
           `some worktrees could not be removed; the manifest was kept so you can retry:\n  ${failures.join('\n  ')}`,
         );
+      }
+
+      // 6.5. Remove the per-repository container directory the application
+      // created for these worktrees — but only when it is now empty. The
+      // container is shared by every workspace of the same repository, so
+      // anything stronger than an rmdir would risk other workspaces' data.
+      const containers = new Set(
+        manifest.worktreePaths.map((worktreePath) => path.dirname(worktreePath)),
+      );
+      for (const container of containers) {
+        try {
+          assertContained(ctx.paths.worktreesRoot, container, 'UNSAFE_CLEANUP');
+        } catch {
+          continue; // never touch a directory outside the application root
+        }
+        try {
+          await rmdir(container);
+          ctx.stdout(`removed empty worktree container: ${container}`);
+        } catch {
+          // Still holds other workspaces' worktrees (or is already gone);
+          // leave it exactly as it is.
+        }
       }
 
       // 7. Remove the manifest.

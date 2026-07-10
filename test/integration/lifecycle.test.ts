@@ -120,12 +120,54 @@ describe('cw clean', () => {
 
     expect(await hasSession(test.tmux, 'cw-demo')).toBe(false);
     expect(existsSync(worktreePath)).toBe(false);
+    // The now-empty per-repository container the app created is removed too.
+    expect(existsSync(path.dirname(worktreePath))).toBe(false);
+    expect(existsSync(test.ctx.paths.worktreesRoot)).toBe(true);
     expect(await loadManifest(test.ctx.paths.workspacesDir, 'demo')).toBeNull();
     // The branch is ALWAYS preserved.
     expect(await git.branchExists(test.runner, test.repoRoot, 'cw/demo')).toBe(true);
     const output = test.lines.join('\n');
     expect(output).toContain('preserved branches');
     expect(output).toContain(`git -C ${test.repoRoot} branch -d cw/demo`);
+  });
+
+  it('keeps the shared container until the last workspace of the repository is cleaned', async () => {
+    const test = await contextInRepo();
+    await test.run(['focus', 'one', '--no-claude']);
+    await test.run(['focus', 'two', '--no-claude']);
+    const manifest = await loadManifest(test.ctx.paths.workspacesDir, 'one');
+    const container = manifest?.ok ? path.dirname(manifest.manifest.worktreePaths[0]!) : '';
+
+    // Both workspaces share the per-repository container; cleaning one must
+    // not disturb the other's worktree.
+    await test.run(['clean', 'one']);
+    expect(existsSync(container)).toBe(true);
+    const remaining = await loadManifest(test.ctx.paths.workspacesDir, 'two');
+    expect(remaining?.ok && existsSync(remaining.manifest.worktreePaths[0]!)).toBe(true);
+
+    await test.run(['clean', 'two']);
+    expect(existsSync(container)).toBe(false);
+  });
+
+  it('never deletes a container that still holds unrelated files, nor sibling directories', async () => {
+    const test = await contextInRepo();
+    await test.run(['focus', 'demo', '--no-claude']);
+    const manifest = await loadManifest(test.ctx.paths.workspacesDir, 'demo');
+    const container = manifest?.ok ? path.dirname(manifest.manifest.worktreePaths[0]!) : '';
+
+    const stray = path.join(container, 'stray-not-ours.txt');
+    await writeFile(stray, 'someone else put this here\n', 'utf8');
+    const sibling = path.join(test.ctx.paths.worktreesRoot, 'other-repo-deadbeef');
+    await mkdir(sibling, { recursive: true });
+    await writeFile(path.join(sibling, 'keep.txt'), 'unrelated\n', 'utf8');
+
+    await test.run(['clean', 'demo']);
+
+    // Cleanup succeeded, but nothing beyond the empty-directory attempt ran.
+    expect(await loadManifest(test.ctx.paths.workspacesDir, 'demo')).toBeNull();
+    expect(existsSync(container)).toBe(true);
+    expect(existsSync(stray)).toBe(true);
+    expect(existsSync(path.join(sibling, 'keep.txt'))).toBe(true);
   });
 
   it('keeps the manifest when a worktree cannot be removed, so clean can be retried', async () => {
