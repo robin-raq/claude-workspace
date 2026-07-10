@@ -28,5 +28,5 @@ Initial release.
   never deletes branches or dirty worktrees.
 - Self-contained installer/uninstaller (`scripts/install.sh`,
   `scripts/uninstall.sh`) targeting `~/.local`, with `--dry-run`.
-- 186 unit and integration tests (real temp repositories, isolated tmux
+- 188 unit and integration tests (real temp repositories, isolated tmux
   servers, fake `claude`, temp-HOME installer tests).
