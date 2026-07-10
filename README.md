@@ -137,9 +137,6 @@ cw doctor
 
 Run these commands from any directory. No `sudo` is needed.
 
-<!-- release-preparation: this repository URL is not live until the first
-     public release is published; verify it resolves before announcing. -->
-
 ```bash
 git clone https://github.com/robin-raq/claude-workspace.git
 cd claude-workspace
