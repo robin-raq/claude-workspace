@@ -113,6 +113,14 @@ export async function deleteBranchForRollback(
   await git(runner, repoRoot, ['branch', '-D', branch]);
 }
 
+/** Short branch name, or 'detached@<short-hash>' on a detached HEAD. */
+export async function currentBranchOrCommit(runner: CommandRunner, dir: string): Promise<string> {
+  const branch = await runner('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], { cwd: dir });
+  if (branch.exitCode === 0) return branch.stdout.trim();
+  const commit = await git(runner, dir, ['rev-parse', '--short', 'HEAD']);
+  return `detached@${commit.trim()}`;
+}
+
 /** Current git version string, or null when git is unavailable. */
 export async function gitVersion(runner: CommandRunner): Promise<string | null> {
   const result = await runner('git', ['--version']);

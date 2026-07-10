@@ -1,0 +1,12 @@
+#!/bin/sh
+# Fake Claude Code executable for cw integration tests.
+# Never contacts any API; records its argv when FAKE_CLAUDE_LOG is set.
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
+  echo "0.0.0-fake (Claude Code)"
+  exit 0
+fi
+if [ -n "$FAKE_CLAUDE_LOG" ]; then
+  printf '%s\n' "$*" >> "$FAKE_CLAUDE_LOG"
+fi
+echo "fake claude session started"
+exec sleep 300

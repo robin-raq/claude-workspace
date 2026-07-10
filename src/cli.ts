@@ -1,5 +1,9 @@
 import { createRequire } from 'node:module';
 import { Command } from 'commander';
+import { registerFocusCommand } from './commands/focus.js';
+import { registerParallelCommand } from './commands/parallel.js';
+import { registerTeamCommand } from './commands/team.js';
+import type { AppContext } from './context.js';
 
 const require = createRequire(import.meta.url);
 const pkg = require('../package.json') as { version: string };
@@ -9,26 +13,31 @@ export const APP_VERSION: string = pkg.version;
 export const UNOFFICIAL_DISCLAIMER =
   'Claude Workspace is an unofficial community project, not affiliated with or endorsed by Anthropic.';
 
-export interface CliIo {
-  stdout: (text: string) => void;
-  stderr: (text: string) => void;
-}
-
-export function createProgram(io: CliIo): Command {
+export function createProgram(ctx: AppContext): Command {
   const program = new Command('cw');
 
   program
     .description(
       'WSL-first tmux workspace manager for structured Claude Code development sessions.',
     )
-    .version(APP_VERSION);
+    .version(APP_VERSION)
+    .exitOverride()
+    .configureOutput({
+      writeOut: (text) => ctx.stdout(text.replace(/\n$/, '')),
+      writeErr: (text) => ctx.stderr(text.replace(/\n$/, '')),
+    });
+
+  registerFocusCommand(program, ctx);
+  registerParallelCommand(program, ctx);
+  registerTeamCommand(program, ctx);
 
   program
     .command('version')
     .description('Print the cw version')
     .action(() => {
-      io.stdout(`cw ${APP_VERSION}`);
-      io.stdout(UNOFFICIAL_DISCLAIMER);
+      ctx.stdout(`cw ${APP_VERSION}`);
+      ctx.stdout(`platform: ${ctx.platform.detail}`);
+      ctx.stdout(UNOFFICIAL_DISCLAIMER);
     });
 
   return program;

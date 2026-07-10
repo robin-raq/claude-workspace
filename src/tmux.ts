@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { CwError } from './errors.js';
 import type { RoleColor } from './roles.js';
 import type { CommandRunner, RunResult } from './runner.js';
@@ -193,6 +194,20 @@ export async function createWorkspaceSession(t: TmuxExec, spec: SessionSpec): Pr
     await t(['kill-session', '-t', `=${spec.session}`]);
     throw error;
   }
+}
+
+/**
+ * Attach the current terminal to a session. This is the one place cw hands
+ * the terminal over to tmux, so it uses inherited stdio instead of the
+ * capturing runner. Returns the tmux exit status.
+ */
+export function attachSessionInteractive(session: string, socketName?: string): number {
+  const args =
+    socketName === undefined
+      ? ['attach-session', '-t', `=${session}`]
+      : ['-L', socketName, 'attach-session', '-t', `=${session}`];
+  const result = spawnSync('tmux', args, { stdio: 'inherit' });
+  return result.status ?? 1;
 }
 
 export async function listPaneTitles(t: TmuxExec, session: string): Promise<string[]> {
