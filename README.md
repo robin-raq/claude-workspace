@@ -100,7 +100,7 @@ Claude Code. For development you'll also want ShellCheck
 (`sudo apt install shellcheck`).
 
 ```bash
-git clone https://github.com/<you>/claude-workspace.git
+git clone https://github.com/robin-raq/claude-workspace.git
 cd claude-workspace
 ./scripts/install.sh --dry-run   # preview
 ./scripts/install.sh             # install
