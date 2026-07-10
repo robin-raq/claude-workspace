@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { claudeLaunchArgv, defaultPromptsDir, readRolePrompt } from '../../src/claude.js';
+import {
+  claudeLaunchArgv,
+  claudeVersion,
+  defaultPromptsDir,
+  readRolePrompt,
+} from '../../src/claude.js';
 import { CwError } from '../../src/errors.js';
 import { rolesForMode, type RoleSpec } from '../../src/roles.js';
+import type { CommandRunner } from '../../src/runner.js';
 
 function role(mode: 'focus' | 'parallel' | 'team', id: string): RoleSpec {
   const found = rolesForMode(mode).find((candidate) => candidate.id === id);
@@ -104,12 +110,48 @@ describe('role prompts', () => {
   });
 });
 
+describe('claudeVersion', () => {
+  const stub =
+    (exitCode: number, stdout: string): CommandRunner =>
+    (command, args) =>
+      Promise.resolve({ command, args, stdout, stderr: '', exitCode });
+
+  it('returns the trimmed version string when claude runs', async () => {
+    expect(await claudeVersion(stub(0, '2.1.206 (Claude Code)\n'))).toBe('2.1.206 (Claude Code)');
+  });
+
+  it('returns null when claude is missing or fails', async () => {
+    expect(await claudeVersion(stub(127, ''))).toBeNull();
+  });
+});
+
 describe('rolesForMode', () => {
   it.each(['focus', 'parallel', 'team'] as const)('%s defines exactly four roles', (mode) => {
     const roles = rolesForMode(mode);
     expect(roles).toHaveLength(4);
     expect(new Set(roles.map((spec) => spec.id)).size).toBe(4);
     expect(new Set(roles.map((spec) => spec.color)).size).toBe(4);
+  });
+
+  it('assigns the labels to the expected pane indices per mode', () => {
+    expect(rolesForMode('focus').map((spec) => spec.label)).toEqual([
+      'COORDINATOR',
+      'BUILDER',
+      'REVIEWER',
+      'VERIFIER',
+    ]);
+    expect(rolesForMode('parallel').map((spec) => spec.label)).toEqual([
+      'TRACK A',
+      'TRACK B',
+      'TRACK C',
+      'TRACK D',
+    ]);
+    expect(rolesForMode('team').map((spec) => spec.label)).toEqual([
+      'TEAM LEAD',
+      'WORKSPACE STATUS',
+      'VALIDATION',
+      'GIT STATUS',
+    ]);
   });
 
   it('matches the required color assignments', () => {

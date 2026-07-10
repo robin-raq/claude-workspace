@@ -12,6 +12,7 @@ import {
   failureVisibleCommand,
   hasSession,
   makeTmux,
+  paneTitle,
   shellCommand,
   shellQuote,
   tmuxVersion,
@@ -144,9 +145,8 @@ async function buildPaneSpecs(
       const worktree = role.workdir === 'repo' ? undefined : plan.worktrees[role.workdir];
       const cwd = worktree?.path ?? plan.repoRoot;
       const context = worktree === undefined ? repoBranch : `${worktree.branch} [wt]`;
-      const title = `${role.label} · ${context}`;
       return {
-        title,
+        title: paneTitle(role.label, context),
         color: role.color,
         cwd,
         command: await paneCommand(ctx, plan, role, options),

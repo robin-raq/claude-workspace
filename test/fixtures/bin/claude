@@ -9,4 +9,11 @@ if [ -n "$FAKE_CLAUDE_LOG" ]; then
   printf '%s\n' "$*" >> "$FAKE_CLAUDE_LOG"
 fi
 echo "fake claude session started"
-exec sleep 300
+# Real Claude Code rewrites the terminal title (OSC 2) while it works; do the
+# same so tests prove cw's pane labels survive it.
+i=0
+while [ "$i" -lt 1500 ]; do
+  printf '\033]2;\342\234\263 fake claude working\007'
+  i=$((i+1))
+  sleep 0.2
+done

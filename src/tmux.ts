@@ -70,6 +70,28 @@ export interface SessionSpec {
 }
 
 /**
+ * The border renders this cw-owned pane option instead of #{pane_title}:
+ * programs in the pane (Claude Code updates its terminal title while it
+ * works) rewrite pane_title through OSC escape sequences, which erased the
+ * role labels. A @-prefixed pane option can only be changed via tmux
+ * set-option, so the label survives anything the pane process prints.
+ */
+const PANE_TITLE_OPTION = '@cw_title';
+
+/** Longest context (branch or path) shown in a pane title. */
+const MAX_TITLE_CONTEXT = 40;
+
+/**
+ * Compose a pane title as 'LABEL · context'. Overlong contexts are shortened
+ * with an ellipsis; the role label itself is never truncated.
+ */
+export function paneTitle(label: string, context: string): string {
+  const short =
+    context.length > MAX_TITLE_CONTEXT ? `${context.slice(0, MAX_TITLE_CONTEXT - 1)}…` : context;
+  return `${label} · ${short}`;
+}
+
+/**
  * Per-pane border title styling. Colors vary by pane index through format
  * conditionals; the active pane gets the bright + bold variant of its role
  * color. Without color, labels stay visible and only bold marks activity.
@@ -80,8 +102,9 @@ export function paneBorderFormat(
   colors: readonly [RoleColor, RoleColor, RoleColor, RoleColor],
   colorEnabled: boolean,
 ): string {
+  const label = `#{${PANE_TITLE_OPTION}}`;
   if (!colorEnabled) {
-    return '#{?pane_active,#[bold],} #T ';
+    return `#{?pane_active,#[bold],} ${label} `;
   }
   const perPane = colors
     .map(
@@ -89,7 +112,7 @@ export function paneBorderFormat(
         `#{?#{==:#{pane_index},${index}},#{?pane_active,#[fg=bright${color} bold],#[fg=${color}]},}`,
     )
     .join('');
-  return `${perPane} #T `;
+  return `${perPane} ${label} `;
 }
 
 /**
@@ -185,7 +208,12 @@ export async function createWorkspaceSession(t: TmuxExec, spec: SessionSpec): Pr
     await tmuxMust(t, ['set-option', '-w', '-t', window, 'pane-active-border-style', 'bold']);
 
     for (const [index, pane] of spec.panes.entries()) {
-      await tmuxMust(t, ['select-pane', '-t', paneIds[index] as string, '-T', pane.title]);
+      const paneId = paneIds[index] as string;
+      // The border reads @cw_title (see PANE_TITLE_OPTION); pane_title is
+      // still set for anything else that displays it, but nothing cw renders
+      // depends on it staying intact.
+      await tmuxMust(t, ['set-option', '-p', '-t', paneId, PANE_TITLE_OPTION, pane.title]);
+      await tmuxMust(t, ['select-pane', '-t', paneId, '-T', pane.title]);
     }
     await tmuxMust(t, ['select-layout', '-t', window, 'tiled']);
     await tmuxMust(t, ['select-pane', '-t', firstId]);
@@ -217,6 +245,18 @@ export async function listPaneTitles(t: TmuxExec, session: string): Promise<stri
     `${session}:workspace`,
     '-F',
     '#{pane_title}',
+  ]);
+  return result.stdout.trim().split('\n');
+}
+
+/** The cw-owned role labels per pane, in pane-index order. */
+export async function listPaneLabels(t: TmuxExec, session: string): Promise<string[]> {
+  const result = await tmuxMust(t, [
+    'list-panes',
+    '-t',
+    `${session}:workspace`,
+    '-F',
+    `#{${PANE_TITLE_OPTION}}`,
   ]);
   return result.stdout.trim().split('\n');
 }

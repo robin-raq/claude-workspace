@@ -6,6 +6,7 @@ import { createProgram } from '../../src/cli.js';
 import { CwError } from '../../src/errors.js';
 import { loadManifest } from '../../src/manifest.js';
 import { makeTmux, type TmuxExec } from '../../src/tmux.js';
+import type { CommandRunner } from '../../src/runner.js';
 import { cleanupTempDirs, makeTempRepo, makeTestRunner } from '../helpers/repo.js';
 import { makeTestContext, type TestContext } from '../helpers/context.js';
 
@@ -41,13 +42,15 @@ describe('cw focus', () => {
     const test = await contextInRepo(false);
     await run(test, ['focus', 'demo', '--no-claude']);
 
-    const titles = await paneField(test, 'cw-demo', 'pane_title');
-    expect(titles).toEqual([
+    const expectedTitles = [
       'COORDINATOR · main',
       'BUILDER · cw/demo [wt]',
       'REVIEWER · cw/demo [wt]',
       'VERIFIER · cw/demo [wt]',
-    ]);
+    ];
+    expect(await paneField(test, 'cw-demo', 'pane_title')).toEqual(expectedTitles);
+    // The border label is a cw-owned pane option, independent of pane_title.
+    expect(await paneField(test, 'cw-demo', '@cw_title')).toEqual(expectedTitles);
 
     // Coordinator stays in the original checkout; the other three share ONE worktree.
     const dirs = await paneField(test, 'cw-demo', 'pane_current_path');
@@ -93,13 +96,14 @@ describe('cw parallel', () => {
     const test = await contextInRepo(false);
     await run(test, ['parallel', 'demo', '--no-claude']);
 
-    const titles = await paneField(test, 'cw-demo', 'pane_title');
-    expect(titles).toEqual([
+    const expectedTitles = [
       'TRACK A · cw/demo-a [wt]',
       'TRACK B · cw/demo-b [wt]',
       'TRACK C · cw/demo-c [wt]',
       'TRACK D · cw/demo-d [wt]',
-    ]);
+    ];
+    expect(await paneField(test, 'cw-demo', 'pane_title')).toEqual(expectedTitles);
+    expect(await paneField(test, 'cw-demo', '@cw_title')).toEqual(expectedTitles);
 
     const dirs = await paneField(test, 'cw-demo', 'pane_current_path');
     expect(new Set(dirs).size).toBe(4);
@@ -114,8 +118,10 @@ describe('cw team', () => {
     const test = await contextInRepo(true);
     await run(test, ['team', 'release', '--task', 'ship the release checklist']);
 
-    const titles = await paneField(test, 'cw-release', 'pane_title');
-    expect(titles).toEqual([
+    // pane_title is unstable here — the fake claude in the lead pane rewrites
+    // its terminal title like the real one — so assert on the cw-owned label.
+    const labels = await paneField(test, 'cw-release', '@cw_title');
+    expect(labels).toEqual([
       'TEAM LEAD · main',
       'WORKSPACE STATUS · main',
       'VALIDATION · main',
@@ -242,5 +248,130 @@ describe('inside an existing tmux session', () => {
     servers.push(makeTmux(test.runner, test.socketName));
     await createProgram(test.ctx).parseAsync(['node', 'cw', 'focus', 'demo', '--no-claude']);
     expect(test.lines.join('\n')).toContain('already inside tmux');
+  });
+});
+
+describe('pane labels with a running (fake) Claude', () => {
+  // Regression for the v0.1.0 smoke-gate failure: Claude Code rewrites its
+  // terminal title while working, which used to erase the BUILDER border
+  // label because the border rendered #{pane_title}.
+  it('keeps BUILDER and every other role label after Claude rewrites its title', async () => {
+    const test = await contextInRepo(true);
+    await run(test, ['focus', 'smoke']);
+
+    // Wait until the fake claude has demonstrably hijacked the pane titles.
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const titles = await paneField(test, 'cw-smoke', 'pane_title');
+      if (titles.every((title) => title.includes('fake claude working'))) break;
+      if (Date.now() > deadline) throw new Error(`titles were never rewritten: ${titles.join()}`);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    expect(await paneField(test, 'cw-smoke', '@cw_title')).toEqual([
+      'COORDINATOR · main',
+      'BUILDER · cw/smoke [wt]',
+      'REVIEWER · cw/smoke [wt]',
+      'VERIFIER · cw/smoke [wt]',
+    ]);
+  });
+});
+
+describe('failure after resources were created', () => {
+  it('rolls back the manifest, worktree, and branch when the tmux session cannot be built', async () => {
+    const test = await contextInRepo(false);
+    const failing: CommandRunner = async (command, args, options) => {
+      if (command === 'tmux' && args.includes('select-layout')) {
+        return { command, args, stdout: '', stderr: 'injected tmux failure', exitCode: 1 };
+      }
+      return test.runner(command, args, options);
+    };
+
+    await expect(
+      createProgram({ ...test.ctx, runner: failing }).parseAsync([
+        'node',
+        'cw',
+        'focus',
+        'demo',
+        '--no-claude',
+      ]),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof CwError &&
+        error.category === 'LAUNCH_ERROR' &&
+        error.message.includes('rollback'),
+    );
+
+    // Nothing survives: no manifest, no worktree, no branch, no session.
+    expect(await loadManifest(test.ctx.paths.workspacesDir, 'demo')).toBeNull();
+    const branches = await test.runner('git', ['branch', '--list', 'cw/*'], {
+      cwd: test.repoRoot,
+    });
+    expect(branches.stdout.trim()).toBe('');
+    const worktrees = await test.runner('git', ['worktree', 'list'], { cwd: test.repoRoot });
+    expect(worktrees.stdout.trim().split('\n')).toHaveLength(1);
+    const tmux = makeTmux(test.runner, test.socketName);
+    expect((await tmux(['has-session', '-t', '=cw-demo'])).exitCode).not.toBe(0);
+  });
+});
+
+describe('missing dependencies', () => {
+  const failCommand =
+    (base: CommandRunner, name: string): CommandRunner =>
+    async (command, args, options) => {
+      if (command === name) {
+        return { command, args, stdout: '', stderr: 'not found', exitCode: 127 };
+      }
+      return base(command, args, options);
+    };
+
+  it('reports missing tmux as a DEPENDENCY_ERROR', async () => {
+    const test = await contextInRepo(false);
+    await expect(
+      createProgram({ ...test.ctx, runner: failCommand(test.runner, 'tmux') }).parseAsync([
+        'node',
+        'cw',
+        'focus',
+        'demo',
+        '--no-claude',
+      ]),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof CwError &&
+        error.category === 'DEPENDENCY_ERROR' &&
+        error.message.includes('tmux'),
+    );
+  });
+
+  it('reports missing claude as a DEPENDENCY_ERROR unless --no-claude is given', async () => {
+    const test = await contextInRepo(false);
+    await expect(
+      createProgram({ ...test.ctx, runner: failCommand(test.runner, 'claude') }).parseAsync([
+        'node',
+        'cw',
+        'focus',
+        'demo',
+      ]),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof CwError &&
+        error.category === 'DEPENDENCY_ERROR' &&
+        error.message.includes('claude'),
+    );
+  });
+});
+
+describe('tmux session collisions', () => {
+  it('refuses when the session name is taken even without a manifest', async () => {
+    const test = await contextInRepo(false);
+    const tmux = makeTmux(test.runner, test.socketName);
+    await tmux(['new-session', '-d', '-s', 'cw-demo', 'sleep 60']);
+
+    await expect(run(test, ['focus', 'demo', '--no-claude'])).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof CwError &&
+        error.category === 'WORKSPACE_CONFLICT' &&
+        error.message.includes("tmux session 'cw-demo'"),
+    );
   });
 });

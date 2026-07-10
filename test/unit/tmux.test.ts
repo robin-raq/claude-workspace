@@ -3,6 +3,7 @@ import {
   bannerShellCommand,
   failureVisibleCommand,
   paneBorderFormat,
+  paneTitle,
   shellCommand,
   shellQuote,
 } from '../../src/tmux.js';
@@ -51,6 +52,29 @@ describe('shellCommand', () => {
   });
 });
 
+describe('paneTitle', () => {
+  it('joins the role label and context', () => {
+    expect(paneTitle('BUILDER', 'cw/real-claude-smoke')).toBe('BUILDER · cw/real-claude-smoke');
+  });
+
+  it('truncates a long context with an ellipsis instead of the role label', () => {
+    const branch = `cw/${'very-long-feature-name-'.repeat(4)}x [wt]`;
+    const title = paneTitle('BUILDER', branch);
+    expect(title.startsWith('BUILDER · cw/very-long-feature-name-')).toBe(true);
+    expect(title.endsWith('…')).toBe(true);
+    expect(title.length).toBeLessThan(`BUILDER · ${branch}`.length);
+  });
+
+  it('never truncates the role label itself', () => {
+    const title = paneTitle('WORKSPACE STATUS', 'a'.repeat(200));
+    expect(title.startsWith('WORKSPACE STATUS · ')).toBe(true);
+  });
+
+  it('leaves short contexts untouched', () => {
+    expect(paneTitle('VERIFIER', 'main')).toBe('VERIFIER · main');
+  });
+});
+
 describe('paneBorderFormat', () => {
   const colors = ['cyan', 'green', 'magenta', 'yellow'] as const;
 
@@ -62,7 +86,7 @@ describe('paneBorderFormat', () => {
     }
     expect(format).toContain('#{==:#{pane_index},0}');
     expect(format).toContain('#{==:#{pane_index},3}');
-    expect(format).toContain('#T');
+    expect(format).toContain('#{@cw_title}');
   });
 
   it('never colors the pane background', () => {
@@ -71,9 +95,18 @@ describe('paneBorderFormat', () => {
 
   it('keeps labels visible without any color codes when color is disabled', () => {
     const format = paneBorderFormat(colors, false);
-    expect(format).toContain('#T');
+    expect(format).toContain('#{@cw_title}');
     expect(format).not.toContain('fg=');
     expect(format).toContain('#[bold]');
+  });
+
+  it('renders the cw-owned pane option, never the process-writable pane title', () => {
+    for (const colorEnabled of [true, false]) {
+      const format = paneBorderFormat(colors, colorEnabled);
+      expect(format).toContain('#{@cw_title}');
+      expect(format).not.toContain('#T');
+      expect(format).not.toContain('pane_title');
+    }
   });
 });
 

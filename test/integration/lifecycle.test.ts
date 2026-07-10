@@ -128,6 +128,29 @@ describe('cw clean', () => {
     expect(output).toContain(`git -C ${test.repoRoot} branch -d cw/demo`);
   });
 
+  it('keeps the manifest when a worktree cannot be removed, so clean can be retried', async () => {
+    const test = await contextInRepo();
+    await test.run(['focus', 'demo', '--no-claude']);
+    const manifest = await loadManifest(test.ctx.paths.workspacesDir, 'demo');
+    const worktreePath = manifest?.ok ? manifest.manifest.worktreePaths[0]! : '';
+
+    // A locked worktree makes 'git worktree remove' fail without --force.
+    await test.runner('git', ['worktree', 'lock', worktreePath, '--reason', 'test'], {
+      cwd: test.repoRoot,
+    });
+    const error = await expectCategory(test.run(['clean', 'demo']), 'GIT_ERROR');
+    expect(error.message).toContain('could not be removed');
+    expect(error.message).toContain('the manifest was kept');
+    expect(existsSync(worktreePath)).toBe(true);
+    expect(await loadManifest(test.ctx.paths.workspacesDir, 'demo')).not.toBeNull();
+
+    // After unlocking, the retry completes the cleanup.
+    await test.runner('git', ['worktree', 'unlock', worktreePath], { cwd: test.repoRoot });
+    await test.run(['clean', 'demo']);
+    expect(existsSync(worktreePath)).toBe(false);
+    expect(await loadManifest(test.ctx.paths.workspacesDir, 'demo')).toBeNull();
+  });
+
   it('refuses dirty worktrees BEFORE stopping the session or touching anything', async () => {
     const test = await contextInRepo();
     await test.run(['parallel', 'demo', '--no-claude']);

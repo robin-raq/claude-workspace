@@ -10,6 +10,7 @@ import {
   createWorkspaceResources,
   planWorkspace,
   preflightRepo,
+  rollbackCreated,
   type WorkspacePlan,
 } from '../../src/workspace.js';
 import {
@@ -128,6 +129,14 @@ describe('preflight refusals', () => {
     await expectCwErrorAsync(() => preflightRepo(runner, dir, undefined), 'GIT_ERROR');
   });
 
+  it('refuses a bare repository', async () => {
+    // A bare repo has no toplevel, so repo-root resolution already refuses it;
+    // preflightRepo's explicit isBareRepo check is a second line of defense.
+    const dir = await makeTempDir('cw-test-nowt-');
+    await gitInDir(runner, dir, ['init', '-q', '--bare']);
+    await expectCwErrorAsync(() => preflightRepo(runner, dir, undefined), 'GIT_ERROR');
+  });
+
   it('refuses an unresolvable base ref', async () => {
     const repoRoot = await makeTempRepo(runner);
     await expectCwErrorAsync(
@@ -195,5 +204,39 @@ describe('rollback on partial failure', () => {
     expect(await git.branchExists(runner, repoRoot, 'cw/demo-b')).toBe(false);
     expect(await loadManifest(workspacesDir, 'demo')).toBeNull();
     expect(await git.listWorktreePaths(runner, repoRoot)).toEqual([repoRoot]);
+  });
+
+  it('removes the manifest during rollback and reports steps that fail', async () => {
+    const { repoRoot, worktreesRoot, workspacesDir, plan } = await setup('focus');
+    await create(plan, workspacesDir, worktreesRoot);
+    expect(await loadManifest(workspacesDir, 'demo')).not.toBeNull();
+
+    // One real worktree (removable) plus one that was never created, so the
+    // rollback report must show both a success and a failure.
+    const ghost = { branch: 'cw/never-created', path: path.join(worktreesRoot, 'ghost') };
+    const steps = await rollbackCreated(runner, repoRoot, workspacesDir, {
+      worktrees: [plan.worktrees[0]!, ghost],
+      manifestName: 'demo',
+    });
+
+    expect(await loadManifest(workspacesDir, 'demo')).toBeNull();
+    expect(existsSync(plan.worktrees[0]!.path)).toBe(false);
+    expect(await git.branchExists(runner, repoRoot, 'cw/demo')).toBe(false);
+
+    const manifestStep = steps.find((step) => step.action === 'remove manifest');
+    expect(manifestStep?.ok).toBe(true);
+    const ghostSteps = steps.filter((step) => step.target.includes('ghost'));
+    expect(ghostSteps.length).toBeGreaterThan(0);
+    expect(ghostSteps.every((step) => !step.ok)).toBe(true);
+    expect(ghostSteps[0]?.error).toBeTruthy();
+  });
+});
+
+describe('branch and commit labels', () => {
+  it('labels a detached HEAD with its short commit hash', async () => {
+    const repoRoot = await makeTempRepo(runner);
+    expect(await git.currentBranchOrCommit(runner, repoRoot)).toBe('main');
+    await gitInDir(runner, repoRoot, ['checkout', '-q', '--detach']);
+    expect(await git.currentBranchOrCommit(runner, repoRoot)).toMatch(/^detached@[0-9a-f]{4,}$/);
   });
 });
