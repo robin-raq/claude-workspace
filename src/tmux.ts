@@ -56,7 +56,10 @@ export async function killSession(t: TmuxExec, session: string): Promise<void> {
 }
 
 export interface PaneSpec {
-  title: string;
+  /** Role label (e.g. 'BUILDER'); stored in the cw-owned @cw_role pane option. */
+  role: string;
+  /** Branch or repository context shown after the role (e.g. 'cw/demo [wt]'). */
+  context: string;
   color: RoleColor;
   cwd: string;
   /** Full shell command line for the pane (already quoted by the caller). */
@@ -70,25 +73,33 @@ export interface SessionSpec {
 }
 
 /**
- * The border renders this cw-owned pane option instead of #{pane_title}:
+ * The border renders these cw-owned pane options instead of #{pane_title}:
  * programs in the pane (Claude Code updates its terminal title while it
  * works) rewrite pane_title through OSC escape sequences, which erased the
- * role labels. A @-prefixed pane option can only be changed via tmux
- * set-option, so the label survives anything the pane process prints.
+ * role labels. @-prefixed pane options can only be changed via tmux
+ * set-option, so the labels survive anything the pane process prints.
+ * The role identity and the branch context are stored separately so the
+ * role always renders first and is never the part that gets shortened.
  */
-const PANE_TITLE_OPTION = '@cw_title';
+export const PANE_ROLE_OPTION = '@cw_role';
+export const PANE_CONTEXT_OPTION = '@cw_context';
 
-/** Longest context (branch or path) shown in a pane title. */
+/** Longest context (branch or path) shown next to a role label. */
 const MAX_TITLE_CONTEXT = 40;
 
+/** Shorten overlong branch/repository context with an ellipsis. */
+export function truncateContext(context: string): string {
+  return context.length > MAX_TITLE_CONTEXT
+    ? `${context.slice(0, MAX_TITLE_CONTEXT - 1)}…`
+    : context;
+}
+
 /**
- * Compose a pane title as 'LABEL · context'. Overlong contexts are shortened
- * with an ellipsis; the role label itself is never truncated.
+ * Compose a pane title as 'ROLE · context' (pane_title convenience only —
+ * the border never depends on it). The role label is never truncated.
  */
-export function paneTitle(label: string, context: string): string {
-  const short =
-    context.length > MAX_TITLE_CONTEXT ? `${context.slice(0, MAX_TITLE_CONTEXT - 1)}…` : context;
-  return `${label} · ${short}`;
+export function paneTitle(role: string, context: string): string {
+  return `${role} · ${truncateContext(context)}`;
 }
 
 /**
@@ -96,13 +107,14 @@ export function paneTitle(label: string, context: string): string {
  * conditionals; the active pane gets the bright + bold variant of its role
  * color. Without color, labels stay visible and only bold marks activity.
  * Style attributes are space-separated because commas would terminate the
- * surrounding #{?,,} conditional.
+ * surrounding #{?,,} conditional. The role renders before the context so
+ * width pressure always cuts metadata, never the role.
  */
 export function paneBorderFormat(
   colors: readonly [RoleColor, RoleColor, RoleColor, RoleColor],
   colorEnabled: boolean,
 ): string {
-  const label = `#{${PANE_TITLE_OPTION}}`;
+  const label = `#{${PANE_ROLE_OPTION}} · #{${PANE_CONTEXT_OPTION}}`;
   if (!colorEnabled) {
     return `#{?pane_active,#[bold],} ${label} `;
   }
@@ -209,11 +221,19 @@ export async function createWorkspaceSession(t: TmuxExec, spec: SessionSpec): Pr
 
     for (const [index, pane] of spec.panes.entries()) {
       const paneId = paneIds[index] as string;
-      // The border reads @cw_title (see PANE_TITLE_OPTION); pane_title is
-      // still set for anything else that displays it, but nothing cw renders
-      // depends on it staying intact.
-      await tmuxMust(t, ['set-option', '-p', '-t', paneId, PANE_TITLE_OPTION, pane.title]);
-      await tmuxMust(t, ['select-pane', '-t', paneId, '-T', pane.title]);
+      // The border reads @cw_role and @cw_context; pane_title is still set
+      // for anything else that displays it, but nothing cw renders depends
+      // on it staying intact.
+      await tmuxMust(t, ['set-option', '-p', '-t', paneId, PANE_ROLE_OPTION, pane.role]);
+      await tmuxMust(t, [
+        'set-option',
+        '-p',
+        '-t',
+        paneId,
+        PANE_CONTEXT_OPTION,
+        truncateContext(pane.context),
+      ]);
+      await tmuxMust(t, ['select-pane', '-t', paneId, '-T', paneTitle(pane.role, pane.context)]);
     }
     await tmuxMust(t, ['select-layout', '-t', window, 'tiled']);
     await tmuxMust(t, ['select-pane', '-t', firstId]);
@@ -250,13 +270,13 @@ export async function listPaneTitles(t: TmuxExec, session: string): Promise<stri
 }
 
 /** The cw-owned role labels per pane, in pane-index order. */
-export async function listPaneLabels(t: TmuxExec, session: string): Promise<string[]> {
+export async function listPaneRoles(t: TmuxExec, session: string): Promise<string[]> {
   const result = await tmuxMust(t, [
     'list-panes',
     '-t',
     `${session}:workspace`,
     '-F',
-    `#{${PANE_TITLE_OPTION}}`,
+    `#{${PANE_ROLE_OPTION}}`,
   ]);
   return result.stdout.trim().split('\n');
 }

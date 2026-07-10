@@ -146,7 +146,8 @@ async function buildPaneSpecs(
       const cwd = worktree?.path ?? plan.repoRoot;
       const context = worktree === undefined ? repoBranch : `${worktree.branch} [wt]`;
       return {
-        title: paneTitle(role.label, context),
+        role: role.label,
+        context,
         color: role.color,
         cwd,
         command: await paneCommand(ctx, plan, role, options),
@@ -258,7 +259,7 @@ function renderDryRun(
   out('  panes:');
   for (const [index, pane] of panes.entries()) {
     const role = roles[index];
-    out(`    [${index}] ${paint(role?.color ?? 'cyan', pane.title)}`);
+    out(`    [${index}] ${paint(role?.color ?? 'cyan', paneTitle(pane.role, pane.context))}`);
     out(`        dir: ${pane.cwd}`);
     out(`        cmd: ${pane.command}`);
   }

@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   bannerShellCommand,
+  createWorkspaceSession,
   failureVisibleCommand,
   paneBorderFormat,
   paneTitle,
   shellCommand,
   shellQuote,
+  truncateContext,
+  type SessionSpec,
+  type TmuxExec,
 } from '../../src/tmux.js';
 
 describe('shellQuote', () => {
@@ -52,7 +56,7 @@ describe('shellCommand', () => {
   });
 });
 
-describe('paneTitle', () => {
+describe('paneTitle / truncateContext', () => {
   it('joins the role label and context', () => {
     expect(paneTitle('BUILDER', 'cw/real-claude-smoke')).toBe('BUILDER · cw/real-claude-smoke');
   });
@@ -63,6 +67,7 @@ describe('paneTitle', () => {
     expect(title.startsWith('BUILDER · cw/very-long-feature-name-')).toBe(true);
     expect(title.endsWith('…')).toBe(true);
     expect(title.length).toBeLessThan(`BUILDER · ${branch}`.length);
+    expect(truncateContext(branch).endsWith('…')).toBe(true);
   });
 
   it('never truncates the role label itself', () => {
@@ -72,6 +77,7 @@ describe('paneTitle', () => {
 
   it('leaves short contexts untouched', () => {
     expect(paneTitle('VERIFIER', 'main')).toBe('VERIFIER · main');
+    expect(truncateContext('main')).toBe('main');
   });
 });
 
@@ -86,7 +92,7 @@ describe('paneBorderFormat', () => {
     }
     expect(format).toContain('#{==:#{pane_index},0}');
     expect(format).toContain('#{==:#{pane_index},3}');
-    expect(format).toContain('#{@cw_title}');
+    expect(format).toContain('#{@cw_role}');
   });
 
   it('never colors the pane background', () => {
@@ -95,18 +101,72 @@ describe('paneBorderFormat', () => {
 
   it('keeps labels visible without any color codes when color is disabled', () => {
     const format = paneBorderFormat(colors, false);
-    expect(format).toContain('#{@cw_title}');
+    expect(format).toContain('#{@cw_role}');
     expect(format).not.toContain('fg=');
     expect(format).toContain('#[bold]');
   });
 
-  it('renders the cw-owned pane option, never the process-writable pane title', () => {
+  it('renders the cw-owned role option first, never the process-writable pane title', () => {
     for (const colorEnabled of [true, false]) {
       const format = paneBorderFormat(colors, colorEnabled);
-      expect(format).toContain('#{@cw_title}');
+      expect(format).toContain('#{@cw_role}');
+      expect(format).toContain('#{@cw_context}');
+      // The role renders before the context, so width pressure cuts metadata.
+      expect(format.indexOf('#{@cw_role}')).toBeLessThan(format.indexOf('#{@cw_context}'));
       expect(format).not.toContain('#T');
       expect(format).not.toContain('pane_title');
     }
+  });
+});
+
+describe('createWorkspaceSession role assignment', () => {
+  function spec(): SessionSpec {
+    const pane = (role: string, color: SessionSpec['panes'][0]['color']) => ({
+      role,
+      context: 'cw/demo [wt]',
+      color,
+      cwd: '/tmp',
+      command: 'true',
+    });
+    return {
+      session: 'cw-demo',
+      colorEnabled: true,
+      panes: [
+        pane('COORDINATOR', 'cyan'),
+        pane('BUILDER', 'green'),
+        pane('REVIEWER', 'magenta'),
+        pane('VERIFIER', 'yellow'),
+      ],
+    };
+  }
+
+  it('sets exactly one @cw_role per pane, in pane-index order', async () => {
+    const calls: string[][] = [];
+    // Split order in createWorkspaceSession: bottom-left, top-right,
+    // bottom-right. Returning these ids yields paneIds [%0, %1, %2, %3].
+    const splitIds = ['%2', '%1', '%3'];
+    let splits = 0;
+    const fake: TmuxExec = (args) => {
+      calls.push(args);
+      let stdout = '';
+      if (args[0] === 'list-panes') stdout = '%0';
+      if (args[0] === 'split-window') stdout = splitIds[splits++] ?? '';
+      return Promise.resolve({ command: 'tmux', args, stdout, stderr: '', exitCode: 0 });
+    };
+
+    await createWorkspaceSession(fake, spec());
+
+    const roleAssignments = calls
+      .filter((args) => args[0] === 'set-option' && args.includes('@cw_role'))
+      .map((args) => [args[args.indexOf('-t') + 1], args[args.length - 1]]);
+    expect(roleAssignments).toEqual([
+      ['%0', 'COORDINATOR'],
+      ['%1', 'BUILDER'],
+      ['%2', 'REVIEWER'],
+      ['%3', 'VERIFIER'],
+    ]);
+    // Exactly one assignment per pane id.
+    expect(new Set(roleAssignments.map(([id]) => id)).size).toBe(4);
   });
 });
 

@@ -49,8 +49,19 @@ describe('cw focus', () => {
       'VERIFIER · cw/demo [wt]',
     ];
     expect(await paneField(test, 'cw-demo', 'pane_title')).toEqual(expectedTitles);
-    // The border label is a cw-owned pane option, independent of pane_title.
-    expect(await paneField(test, 'cw-demo', '@cw_title')).toEqual(expectedTitles);
+    // The border label is built from cw-owned pane options, independent of pane_title.
+    expect(await paneField(test, 'cw-demo', '@cw_role')).toEqual([
+      'COORDINATOR',
+      'BUILDER',
+      'REVIEWER',
+      'VERIFIER',
+    ]);
+    expect(await paneField(test, 'cw-demo', '@cw_context')).toEqual([
+      'main',
+      'cw/demo [wt]',
+      'cw/demo [wt]',
+      'cw/demo [wt]',
+    ]);
 
     // Coordinator stays in the original checkout; the other three share ONE worktree.
     const dirs = await paneField(test, 'cw-demo', 'pane_current_path');
@@ -103,7 +114,12 @@ describe('cw parallel', () => {
       'TRACK D · cw/demo-d [wt]',
     ];
     expect(await paneField(test, 'cw-demo', 'pane_title')).toEqual(expectedTitles);
-    expect(await paneField(test, 'cw-demo', '@cw_title')).toEqual(expectedTitles);
+    expect(await paneField(test, 'cw-demo', '@cw_role')).toEqual([
+      'TRACK A',
+      'TRACK B',
+      'TRACK C',
+      'TRACK D',
+    ]);
 
     const dirs = await paneField(test, 'cw-demo', 'pane_current_path');
     expect(new Set(dirs).size).toBe(4);
@@ -119,14 +135,14 @@ describe('cw team', () => {
     await run(test, ['team', 'release', '--task', 'ship the release checklist']);
 
     // pane_title is unstable here — the fake claude in the lead pane rewrites
-    // its terminal title like the real one — so assert on the cw-owned label.
-    const labels = await paneField(test, 'cw-release', '@cw_title');
-    expect(labels).toEqual([
-      'TEAM LEAD · main',
-      'WORKSPACE STATUS · main',
-      'VALIDATION · main',
-      'GIT STATUS · main',
+    // its terminal title like the real one — so assert on the cw-owned role.
+    expect(await paneField(test, 'cw-release', '@cw_role')).toEqual([
+      'TEAM LEAD',
+      'WORKSPACE STATUS',
+      'VALIDATION',
+      'GIT STATUS',
     ]);
+    expect(new Set(await paneField(test, 'cw-release', '@cw_context'))).toEqual(new Set(['main']));
 
     const commands = await paneField(test, 'cw-release', 'pane_start_command');
     expect(commands[0]).toContain('ship the release checklist');
@@ -268,11 +284,17 @@ describe('pane labels with a running (fake) Claude', () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
-    expect(await paneField(test, 'cw-smoke', '@cw_title')).toEqual([
-      'COORDINATOR · main',
-      'BUILDER · cw/smoke [wt]',
-      'REVIEWER · cw/smoke [wt]',
-      'VERIFIER · cw/smoke [wt]',
+    expect(await paneField(test, 'cw-smoke', '@cw_role')).toEqual([
+      'COORDINATOR',
+      'BUILDER',
+      'REVIEWER',
+      'VERIFIER',
+    ]);
+    expect(await paneField(test, 'cw-smoke', '@cw_context')).toEqual([
+      'main',
+      'cw/smoke [wt]',
+      'cw/smoke [wt]',
+      'cw/smoke [wt]',
     ]);
   });
 });
