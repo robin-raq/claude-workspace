@@ -30,6 +30,7 @@ export async function makeTestContext(options: {
   cwd: string;
   fakeClaude?: boolean;
   env?: Record<string, string>;
+  platform?: AppContext['platform'];
 }): Promise<TestContext> {
   const stateHome = await makeTempDir('cw-test-xdg-state-');
   const dataHome = await makeTempDir('cw-test-xdg-data-');
@@ -58,7 +59,7 @@ export async function makeTestContext(options: {
     appVersion: APP_VERSION,
     promptsDir: path.resolve(FIXTURE_BIN, '..', '..', '..', 'prompts'),
     paths: resolveAppPaths(env, '/nonexistent-home'),
-    platform: { kind: 'wsl', supported: true, detail: 'WSL 2 (test)' },
+    platform: options.platform ?? { kind: 'wsl', supported: true, detail: 'WSL 2 (test)' },
     tmuxSocketName: socketName,
     isTTY: false,
   };

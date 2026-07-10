@@ -1,6 +1,8 @@
 import { createRequire } from 'node:module';
 import { Command } from 'commander';
+import { registerDoctorCommand } from './commands/doctor.js';
 import { registerFocusCommand } from './commands/focus.js';
+import { registerLifecycleCommands } from './commands/lifecycle.js';
 import { registerParallelCommand } from './commands/parallel.js';
 import { registerTeamCommand } from './commands/team.js';
 import type { AppContext } from './context.js';
@@ -30,6 +32,8 @@ export function createProgram(ctx: AppContext): Command {
   registerFocusCommand(program, ctx);
   registerParallelCommand(program, ctx);
   registerTeamCommand(program, ctx);
+  registerLifecycleCommands(program, ctx);
+  registerDoctorCommand(program, ctx);
 
   program
     .command('version')

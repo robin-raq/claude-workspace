@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
-import { readdir } from 'node:fs/promises';
+import { readdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createProgram } from '../../src/cli.js';
 import { CwError } from '../../src/errors.js';
@@ -170,5 +171,76 @@ describe('creation refusals through the CLI', () => {
     await expect(run(test, ['focus', 'demo', '--no-claude'])).rejects.toSatisfy(
       (error: unknown) => error instanceof CwError && error.category === 'WORKSPACE_CONFLICT',
     );
+  });
+
+  it('refuses unsupported platforms before touching anything', async () => {
+    const repoRoot = await makeTempRepo(makeTestRunner());
+    const test = await makeTestContext({
+      cwd: repoRoot,
+      platform: { kind: 'macos', supported: false, detail: 'macOS is not supported in v0.1.0' },
+    });
+    await expect(
+      createProgram(test.ctx).parseAsync(['node', 'cw', 'focus', 'demo', '--no-claude']),
+    ).rejects.toSatisfy(
+      (error: unknown) => error instanceof CwError && error.category === 'DEPENDENCY_ERROR',
+    );
+  });
+});
+
+describe('--base', () => {
+  it('creates the worktree from the requested ref instead of HEAD', async () => {
+    const test = await contextInRepo(false);
+    // Advance main past a tagged base point.
+    await test.runner('git', ['branch', 'base-point'], { cwd: test.repoRoot });
+    await writeFile(path.join(test.repoRoot, 'later.txt'), 'after base\n', 'utf8');
+    await test.runner('git', ['add', '.'], { cwd: test.repoRoot });
+    await test.runner('git', ['commit', '-q', '-m', 'later work'], { cwd: test.repoRoot });
+
+    await run(test, ['focus', 'demo', '--no-claude', '--base', 'base-point']);
+
+    const manifest = await loadManifest(test.ctx.paths.workspacesDir, 'demo');
+    expect(manifest?.ok).toBe(true);
+    if (manifest?.ok) {
+      expect(manifest.manifest.baseRef).toBe('base-point');
+      // The worktree starts at base-point, so the later commit's file is absent.
+      expect(existsSync(`${manifest.manifest.worktreePaths[0]}/later.txt`)).toBe(false);
+      expect(existsSync(`${manifest.manifest.worktreePaths[0]}/README.md`)).toBe(true);
+    }
+  });
+
+  it('rejects an unknown base ref', async () => {
+    const test = await contextInRepo(false);
+    await expect(run(test, ['focus', 'demo', '--no-claude', '--base', 'nope'])).rejects.toSatisfy(
+      (error: unknown) => error instanceof CwError && error.category === 'GIT_ERROR',
+    );
+  });
+});
+
+describe('dry-run variants', () => {
+  it('describes team mode with no worktrees', async () => {
+    const test = await contextInRepo(false);
+    await run(test, ['team', 'release', '--task', 'plan the release', '--dry-run', '--no-color']);
+    const output = test.lines.join('\n');
+    expect(output).toContain('none — team mode runs in the original checkout');
+    expect(output).not.toContain('not a security sandbox');
+  });
+
+  it('lists all four parallel worktrees', async () => {
+    const test = await contextInRepo(false);
+    await run(test, ['parallel', 'demo', '--dry-run', '--no-color']);
+    const output = test.lines.join('\n');
+    for (const track of ['a', 'b', 'c', 'd']) {
+      expect(output).toContain(`cw/demo-${track}`);
+    }
+  });
+});
+
+describe('inside an existing tmux session', () => {
+  it('prints an attach hint instead of nesting', async () => {
+    const repoRoot = await makeTempRepo(makeTestRunner());
+    const test = await makeTestContext({ cwd: repoRoot, env: { TMUX: '/tmp/fake,1,0' } });
+    servers.push(makeTmux(test.runner, test.socketName));
+    await createProgram(test.ctx).parseAsync(['node', 'cw', 'focus', 'demo', '--no-claude']);
+    expect(test.lines.join('\n')).toContain('already inside tmux');
   });
 });
