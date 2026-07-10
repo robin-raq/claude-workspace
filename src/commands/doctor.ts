@@ -8,7 +8,12 @@ import { CwError } from '../errors.js';
 import { gitVersion, resolveRepoRoot } from '../git.js';
 import { makeColorizer, shouldUseColor, type Colorize } from '../output.js';
 import { isWindowsMountPath } from '../platform.js';
-import { tmuxVersion } from '../tmux.js';
+import {
+  isTmuxVersionSupported,
+  MIN_TMUX_VERSION,
+  parseTmuxVersion,
+  tmuxVersion,
+} from '../tmux.js';
 
 interface CheckResult {
   label: string;
@@ -58,16 +63,30 @@ async function runChecks(ctx: AppContext): Promise<CheckResult[]> {
   );
 
   const tmuxDetail = await tmuxVersion(ctx.runner);
-  checks.push(
-    tmuxDetail !== null
-      ? { label: 'tmux', status: 'ok', detail: tmuxDetail }
-      : {
-          label: 'tmux',
-          status: 'fail',
-          detail: 'not found on PATH',
-          remediation: 'install it with: sudo apt install tmux',
-        },
-  );
+  if (tmuxDetail === null) {
+    checks.push({
+      label: 'tmux',
+      status: 'fail',
+      detail: 'not found on PATH',
+      remediation: 'install it with: sudo apt install tmux',
+    });
+  } else if (parseTmuxVersion(tmuxDetail) === null) {
+    checks.push({
+      label: 'tmux',
+      status: 'warn',
+      detail: `unrecognized version output '${tmuxDetail}'`,
+      remediation: `verify 'tmux -V' reports ${MIN_TMUX_VERSION} or newer; cw needs pane-scoped options`,
+    });
+  } else if (!isTmuxVersionSupported(tmuxDetail)) {
+    checks.push({
+      label: 'tmux',
+      status: 'fail',
+      detail: `${tmuxDetail} (need >= ${MIN_TMUX_VERSION} for pane-scoped options)`,
+      remediation: 'upgrade tmux: sudo apt install tmux',
+    });
+  } else {
+    checks.push({ label: 'tmux', status: 'ok', detail: tmuxDetail });
+  }
 
   const claudeDetail = await claudeVersion(ctx.runner);
   checks.push(

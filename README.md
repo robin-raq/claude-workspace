@@ -95,7 +95,7 @@ native Claude agent-team coordination — that is on the roadmap.
 
 ## Installation
 
-Prerequisites: WSL 2 (or Linux), Node.js ≥ 22, Git, tmux, and optionally
+Prerequisites: WSL 2 (or Linux), Node.js ≥ 22, Git, tmux ≥ 3.0, and optionally
 Claude Code. For development you'll also want ShellCheck
 (`sudo apt install shellcheck`).
 

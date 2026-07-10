@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createExecaRunner, type CommandRunner } from '../../src/runner.js';
@@ -109,6 +110,22 @@ describe('install.sh / uninstall.sh in a temporary HOME', () => {
     // Workspace state and (hypothetical) worktrees survive.
     expect(existsSync(stateFile)).toBe(true);
     expect(result.out).toContain('preserved');
+  });
+
+  it('refuses to install when tmux is older than the minimum', async () => {
+    const shim = await makeTempDir('cw-test-oldtmux-');
+    await writeFile(path.join(shim, 'tmux'), '#!/bin/sh\necho "tmux 2.9"\n', { mode: 0o755 });
+
+    const result = await runner(
+      'bash',
+      [path.join(REPO_DIR, 'scripts', 'install.sh'), '--dry-run'],
+      {
+        cwd: REPO_DIR,
+        env: { ...installerEnv(), PATH: `${shim}:${process.env['PATH'] ?? ''}` },
+      },
+    );
+    expect(result.exitCode).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('too old');
   });
 
   it('refuses to overwrite an unrelated cw binary', async () => {

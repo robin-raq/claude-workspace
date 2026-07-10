@@ -306,4 +306,58 @@ describe('cw doctor', () => {
       'DEPENDENCY_ERROR',
     );
   });
+
+  describe('tmux version handling', () => {
+    async function doctorWithTmux(
+      versionOutput: string | null,
+    ): Promise<{ run: () => Promise<void>; lines: string[] }> {
+      const repoRoot = await makeTempRepo(makeTestRunner());
+      const test = await makeTestContext({ cwd: repoRoot });
+      const runner: typeof test.runner = async (command, args, options) => {
+        if (command === 'tmux' && args[0] === '-V') {
+          return versionOutput === null
+            ? { command, args, stdout: '', stderr: 'not found', exitCode: 127 }
+            : { command, args, stdout: `${versionOutput}\n`, stderr: '', exitCode: 0 };
+        }
+        return test.runner(command, args, options);
+      };
+      const ctx = { ...test.ctx, runner };
+      return {
+        run: async () => {
+          await createProgram(ctx).parseAsync(['node', 'cw', 'doctor', '--no-color']);
+        },
+        lines: test.lines,
+      };
+    }
+
+    it('fails when tmux is missing', async () => {
+      const doctor = await doctorWithTmux(null);
+      const error = await expectCategory(doctor.run(), 'DEPENDENCY_ERROR');
+      expect(error.message).toContain('tmux');
+      expect(doctor.lines.join('\n')).toContain('not found on PATH');
+    });
+
+    it('fails when tmux is older than the minimum', async () => {
+      const doctor = await doctorWithTmux('tmux 2.9');
+      const error = await expectCategory(doctor.run(), 'DEPENDENCY_ERROR');
+      expect(error.message).toContain('tmux');
+      expect(doctor.lines.join('\n')).toContain('need >= 3.0');
+    });
+
+    it('warns but passes on unrecognizable version output', async () => {
+      const doctor = await doctorWithTmux('tmux master');
+      await doctor.run();
+      const output = doctor.lines.join('\n');
+      expect(output).toContain("unrecognized version output 'tmux master'");
+      expect(output).toContain('all required checks passed');
+    });
+
+    it('passes at the exact minimum and on newer versions', async () => {
+      for (const version of ['tmux 3.0', 'tmux 3.6']) {
+        const doctor = await doctorWithTmux(version);
+        await doctor.run();
+        expect(doctor.lines.join('\n')).toContain(version);
+      }
+    });
+  });
 });

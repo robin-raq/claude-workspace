@@ -62,8 +62,25 @@ NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
 [ "$NODE_MAJOR" -ge 22 ] || fail "Node.js >= 22 required (found $(node --version))."
 command -v npm > /dev/null 2>&1 || fail "npm not found."
 command -v git > /dev/null 2>&1 || fail "git not found. Install it with: sudo apt install git"
-if ! command -v tmux > /dev/null 2>&1; then
-  say "warning: tmux not found. cw needs it at runtime: sudo apt install tmux"
+# Minimum mirrors MIN_TMUX_VERSION in src/tmux.ts: cw needs pane-scoped
+# user options (set-option -p), introduced in tmux 3.0.
+MIN_TMUX_MAJOR=3
+MIN_TMUX_MINOR=0
+if command -v tmux > /dev/null 2>&1; then
+  TMUX_V="$(tmux -V 2> /dev/null || true)"
+  TMUX_NUM="$(printf '%s' "$TMUX_V" | grep -oE '[0-9]+\.[0-9]+' | head -n1 || true)"
+  if [ -z "$TMUX_NUM" ]; then
+    say "warning: could not parse tmux version from '$TMUX_V'; cw needs tmux >= $MIN_TMUX_MAJOR.$MIN_TMUX_MINOR."
+  else
+    TMUX_MAJOR="${TMUX_NUM%%.*}"
+    TMUX_MINOR="${TMUX_NUM#*.}"
+    if [ "$TMUX_MAJOR" -lt "$MIN_TMUX_MAJOR" ] \
+      || { [ "$TMUX_MAJOR" -eq "$MIN_TMUX_MAJOR" ] && [ "$TMUX_MINOR" -lt "$MIN_TMUX_MINOR" ]; }; then
+      fail "tmux $TMUX_NUM is too old; cw needs tmux >= $MIN_TMUX_MAJOR.$MIN_TMUX_MINOR (pane-scoped options). Upgrade with: sudo apt install tmux"
+    fi
+  fi
+else
+  say "warning: tmux not found. cw needs tmux >= $MIN_TMUX_MAJOR.$MIN_TMUX_MINOR at runtime: sudo apt install tmux"
 fi
 if ! command -v claude > /dev/null 2>&1; then
   say "warning: claude (Claude Code) not found. cw works with --no-claude until it is installed."

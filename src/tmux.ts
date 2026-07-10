@@ -46,6 +46,29 @@ export async function tmuxVersion(runner: CommandRunner): Promise<string | null>
   return result.exitCode === 0 ? result.stdout.trim() : null;
 }
 
+/**
+ * cw stores role labels in pane-scoped user options (set-option -p /
+ * show-options -p), which tmux introduced in 3.0. Every other tmux feature
+ * cw uses (pane-border-format/-status, #{==:...} comparisons, user options
+ * in formats, tiled layout) predates 3.0, so 3.0 is the true minimum.
+ */
+export const MIN_TMUX_VERSION = '3.0';
+
+/** Extract numeric [major, minor] from 'tmux -V' output ('tmux 3.3a', 'tmux next-3.7'), or null. */
+export function parseTmuxVersion(versionOutput: string): [number, number] | null {
+  const match = /(\d+)\.(\d+)/.exec(versionOutput);
+  if (match === null) return null;
+  return [Number(match[1]), Number(match[2])];
+}
+
+export function isTmuxVersionSupported(versionOutput: string): boolean {
+  const parsed = parseTmuxVersion(versionOutput);
+  if (parsed === null) return false;
+  const [minMajor = 0, minMinor = 0] = parseTmuxVersion(MIN_TMUX_VERSION) ?? [];
+  const [major, minor] = parsed;
+  return major > minMajor || (major === minMajor && minor >= minMinor);
+}
+
 export async function hasSession(t: TmuxExec, session: string): Promise<boolean> {
   const result = await t(['has-session', '-t', `=${session}`]);
   return result.exitCode === 0;

@@ -3,8 +3,11 @@ import {
   bannerShellCommand,
   createWorkspaceSession,
   failureVisibleCommand,
+  isTmuxVersionSupported,
+  MIN_TMUX_VERSION,
   paneBorderFormat,
   paneTitle,
+  parseTmuxVersion,
   shellCommand,
   shellQuote,
   truncateContext,
@@ -53,6 +56,37 @@ describe('shellCommand', () => {
     expect(shellCommand(['claude', '--append-system-prompt', 'be safe; be kind'])).toBe(
       "claude --append-system-prompt 'be safe; be kind'",
     );
+  });
+});
+
+describe('tmux minimum version', () => {
+  it('documents 3.0 as the minimum (pane-scoped user options)', () => {
+    expect(MIN_TMUX_VERSION).toBe('3.0');
+  });
+
+  it('parses common tmux -V shapes', () => {
+    expect(parseTmuxVersion('tmux 3.6')).toEqual([3, 6]);
+    expect(parseTmuxVersion('tmux 3.3a')).toEqual([3, 3]);
+    expect(parseTmuxVersion('tmux next-3.7')).toEqual([3, 7]);
+  });
+
+  it('returns null for malformed version output', () => {
+    expect(parseTmuxVersion('tmux master')).toBeNull();
+    expect(parseTmuxVersion('')).toBeNull();
+    expect(isTmuxVersionSupported('tmux master')).toBe(false);
+  });
+
+  it('rejects versions below the minimum', () => {
+    expect(isTmuxVersionSupported('tmux 2.9')).toBe(false);
+    expect(isTmuxVersionSupported('tmux 2.9a')).toBe(false);
+    expect(isTmuxVersionSupported('tmux 1.8')).toBe(false);
+  });
+
+  it('accepts the exact minimum and anything newer', () => {
+    expect(isTmuxVersionSupported('tmux 3.0')).toBe(true);
+    expect(isTmuxVersionSupported('tmux 3.0a')).toBe(true);
+    expect(isTmuxVersionSupported('tmux 3.6')).toBe(true);
+    expect(isTmuxVersionSupported('tmux 10.0')).toBe(true);
   });
 });
 
