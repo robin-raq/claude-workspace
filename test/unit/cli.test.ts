@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { APP_VERSION, createProgram, UNOFFICIAL_DISCLAIMER } from '../../src/cli.js';
 import { makeTestContext } from '../helpers/context.js';
@@ -28,5 +29,31 @@ describe('createProgram', () => {
     await expect(
       createProgram(ctx).parseAsync(['node', 'cw', 'team', 'demo']),
     ).rejects.toMatchObject({ code: 'commander.missingMandatoryOptionValue' });
+  });
+});
+
+// Keeps README.md from drifting away from the real command surface: every
+// registered command and every long option must appear in the README.
+describe('README documents the command surface', () => {
+  const readme = readFileSync(new URL('../../README.md', import.meta.url), 'utf8');
+
+  it('mentions every command', async () => {
+    const { ctx } = await makeTestContext({ cwd: process.cwd() });
+    for (const command of createProgram(ctx).commands) {
+      if (command.name() === 'help') continue;
+      expect(readme, `README is missing 'cw ${command.name()}'`).toContain(`cw ${command.name()}`);
+    }
+  });
+
+  it('mentions every long option', async () => {
+    const { ctx } = await makeTestContext({ cwd: process.cwd() });
+    for (const command of createProgram(ctx).commands) {
+      for (const option of command.options) {
+        if (option.long === undefined || option.long === '--help') continue;
+        expect(readme, `README is missing '${option.long}' (cw ${command.name()})`).toContain(
+          option.long,
+        );
+      }
+    }
   });
 });

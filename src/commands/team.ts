@@ -20,7 +20,7 @@ export function registerTeamCommand(program: Command, ctx: AppContext): void {
         'a validation shell. The lead is a single Claude session; native Claude ' +
         'agent-team coordination is not part of v0.1.0.',
     )
-    .requiredOption('--task <text>', 'the task handed to the Team Lead')
+    .requiredOption('--task <text>', 'the task handed to the Team Lead (required)')
     .option('--base <ref>', 'base ref recorded for the workspace (default: HEAD)')
     .option('--dry-run', 'show everything that would be created, create nothing')
     .option('--no-claude', 'open plain shells instead of launching Claude')
